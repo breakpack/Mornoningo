@@ -13,13 +13,23 @@ import {
   renderQuizQuestion,
   startQuickRandomQuiz,
   startQuizForDoc,
+  openQuizPanel,
+  closeQuizPanel,
+  regenerateQuiz,
+  syncQuizReadyUI,
 } from "./screens/quiz.js";
 
 function init() {
   loadState();
   initRouter();
   configureQuiz({ onStateChange: renderAll });
-  setupUpload({ onAfterUpload: renderAll });
+  setupUpload({
+    onAfterUpload: renderAll,
+    onAutoGenerate: (docId) =>
+      startQuizForDoc(docId, { cacheOnly: true, silent: true }).catch((err) =>
+        console.error("자동 퀴즈 생성 실패", err)
+      ),
+  });
   initEvents();
   renderAll();
   playIntro().then(() => switchScreen("home"));
@@ -38,12 +48,12 @@ function renderAll() {
   renderQuizQuestion();
   renderRanking();
   renderHeaderSummary();
+  syncQuizReadyUI();
 }
 
 function startQuizFlow(docId) {
   if (!docId) return;
-  startQuizForDoc(docId);
-  switchScreen("quiz");
+  startQuizForDoc(docId, { autoOpenPanel: true });
 }
 
 function initEvents() {
@@ -94,6 +104,22 @@ function initEvents() {
         alert("알림이 켜졌다고 가정합니다. (실제 푸시는 서버/앱이 필요)");
       }
     });
+
+  document
+    .getElementById("btn-open-quiz-play")
+    ?.addEventListener("click", openQuizPanel);
+
+  document
+    .getElementById("btn-close-quiz")
+    ?.addEventListener("click", closeQuizPanel);
+
+  document
+    .getElementById("btn-quiz-exit")
+    ?.addEventListener("click", closeQuizPanel);
+
+  document
+    .getElementById("btn-quiz-regenerate")
+    ?.addEventListener("click", regenerateQuiz);
 }
 
 function renderHeaderSummary() {

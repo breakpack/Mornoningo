@@ -1,29 +1,30 @@
-# 모르노닝고 프론트 개편 요약
+# 모르노닝고 현황 요약
 
-## 구조 개편
-- `preview/app.js`, `styles.css`는 삭제하고 `scripts/` + `styles/` 폴더로 모듈화.
-- `index.html`은 CSS(`base/components/screens/intro`)와 JS 모듈(`scripts/main.js`)을 로드.
-- 라우터는 해시 기반(`router.js`)으로 동작하고 `switchScreen`은 URL과 헤더 서브타이틀을 동기화.
+## 프런트 구조
+- `preview/`는 SPA 형태로 구성, CSS는 `styles/base|components|screens|intro.css`, JS는 `scripts/` 모듈로 분할
+- 라우터(`router.js`)는 해시 기반 네비게이션, 인트로(`intro.js`)는 스킵 가능하며 자동 종료
+- `constants.js`가 API_BASE를 자동 결정해 프런트/백이 같은 호스트로 통신
 
-## 스타일
-- `base.css`: 휴대폰 프레임형 레이아웃, bottom-nav pill 버튼, `.app` 높이 clamp.
-- `intro.css`: 앱 내부에서 로딩 인트로 실행.
-- `screens.css`: 랭킹 리스트/모달, 복습 추천 카드, 퀴즈 업로드/랜덤 카드, 기타 UI.
+## 주요 화면/기능
+- 홈: 학습 카드/진도/추천/랭킹 요약, 퀴즈 허브 이동 버튼
+- 랭킹: 리스트 클릭 시 모달로 친구 정보 + "덤벼봐" 버튼 (상대/본인 여부에 따라 문구 다름)
+- 퀴즈 허브: 업로드 카드와 "랜덤 퀴즈" 버튼, 자료 상세, 퀴즈 대기 카드와 로딩 블록
+- 퀴즈 패널: 전면 패널에서 문제 풀이, 결과 요약(정답 수/재생성 버튼) 제공
+- 복습: 오늘 복습 리스트 + 에빙하우스 추천(1/3/7/14일) 리스트
+- My: 개인 통계/배지/랭킹 안내 텍스트
 
-## 주요 화면
-- **홈**: 랭킹 카드 CTA → `btn-go-quiz`로 퀴즈 탭 이동.
-- **랭킹**: 리스트 클릭 시 모달 표시(친구 이름/점수/연속일). 버튼 상태
-  - 나 자신 → "나에게는 보내지 못합니다."
-  - 더 높은 순위 친구 → "랭킹이 너무 높습니다!"
-  - 아래 순위 친구 → "덤벼봐! 🔥"
-- **퀴즈**: 상단 랜덤 퀴즈 버튼, 업로드, 자료 목록, 상세, 숨김 처리된 플레이 카드(추후 노출 가능).
-- **복습**: 오늘 복습 리스트 + "에빙하우스 추천 복습" 리스트(1/3/7/14일 기준 자료 추천).
-- **My**: 랭킹 CTA 버튼 제거, 안내 문구만 유지.
+## 상태/데이터
+- `state.js`: `currentUserId`, `leaderboard`, `upcomingExamDate` 등을 보정, 한글 파일명도 NFC 정규화
+- `runtime.js`: 퀴즈 세션/선택 상태 + 마지막 문서 ID 추적
 
-## 데이터/상태
-- `state.js`: `currentUserId`, `leaderboard`, `ensureLeaderboardSeed()`로 항상 u0(랭킹 지배자) 포함 및 정렬.
-- 샘플 리더보드: u0 → user_me → u2/u3/u4/u5.
+## 백엔드 (server/)
+- FastAPI (`main.py`)가 프론트 정적 자산을 함께 서빙하며 `/api/*` 엔드포인트를 제공
+- 업로드 파일은 `server/upload`, 생성된 퀴즈 기록은 JSON 스토리지(`server/data/quizzes.json`)에 저장
+- PDF는 `pypdf`, PPTX는 단순 XML 파싱으로 텍스트를 추출하고 `normalize_text`로 정리 후 Gemini 2.0 Flash 호출
+- 주요 API: `/api/upload`, `/api/generate-quiz`, `/api/generate-quiz-from-file`, `/health`
 
-## 기타
-- 모든 네비게이션 버튼은 해시 라우팅을 사용하므로 주소 공유 시 동일 화면 재현 가능.
-- 인트로는 로고/문구 타이핑 후 자동으로 홈 화면으로 전환.
+## UX 흐름
+1. 자료 업로드 → 상태 `pending`
+2. "퀴즈 풀기" 클릭 → 로딩 UI, 추출 상태 `processing`
+3. AI 응답 수신 시 상태 `ready`, "퀴즈 풀러가기" 버튼 활성화
+4. 퀴즈 패널에서 문제 풀이, 완료 후 정답 수/재생성 UI 표시

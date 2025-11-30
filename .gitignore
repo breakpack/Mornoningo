@@ -1,3 +1,5 @@
 .env
-/server/uploads
+/server/upload
 /server/node_modules
+/server/.venv
+/server/data/quizzes.json

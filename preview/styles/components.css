@@ -98,14 +98,12 @@
   gap: 8px;
 }
 
-.doc-item,
 .review-item,
 .badge-item {
   padding: 10px 0;
   border-bottom: 1px solid var(--color-border);
 }
 
-.doc-item:last-child,
 .review-item:last-child,
 .badge-item:last-child {
   border-bottom: none;

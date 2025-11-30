@@ -12,37 +12,140 @@ const DEFAULT_DECOYS = [
   "머신러닝 기본",
 ];
 
+const QUIZ_PROGRESS_STEPS = [
+  {
+    id: "prepare",
+    label: "자료 확인 중",
+    description: "선택한 학습 자료를 확인하고 있어요.",
+  },
+  {
+    id: "extract",
+    label: "문서 분석 중",
+    description: "서버에서 텍스트를 추출하는 중입니다.",
+  },
+  {
+    id: "ai",
+    label: "AI 생성 중",
+    description: "Gemini가 문제를 만들고 있어요.",
+  },
+  {
+    id: "finalize",
+    label: "결과 정리 중",
+    description: "생성된 문제를 적용하고 있습니다.",
+  },
+];
+
+const QUIZ_STEP_PROGRESS = {
+  prepare: 15,
+  extract: 45,
+  ai: 75,
+  finalize: 90,
+};
+
 let quizCallbacks = {
   onStateChange: () => {},
+};
+
+const QUIZ_READY_DEFAULT = "학습 자료를 선택하면 AI가 퀴즈를 만들어 드립니다.";
+const quizProgressState = {
+  currentStep: null,
 };
 
 export function configureQuiz({ onStateChange }) {
   quizCallbacks.onStateChange = onStateChange;
 }
 
-export async function startQuizForDoc(docId) {
+export async function startQuizForDoc(docId, options = {}) {
+  const {
+    silent = false,
+    cacheOnly = false,
+    forceRegenerate = false,
+    autoOpenPanel = false,
+  } = options;
   const state = getState();
   const doc = state.docs.find((d) => d.id === docId);
   if (!doc) return;
 
-  const statusEl = document.getElementById("quiz-status");
-  statusEl.textContent = `"${doc.title}" 퀴즈 생성 준비 중...`;
+  updateDocExtractionProgress(docId, 5);
+
+  const hasCachedQuiz =
+    Array.isArray(doc.preloadedQuiz) && doc.preloadedQuiz.length > 0 && !forceRegenerate;
+
+  if (hasCachedQuiz && !cacheOnly) {
+    prepareQuizSession({ docId, questions: doc.preloadedQuiz, title: doc.title });
+    runtime.currentDocId = doc.id;
+    if (!silent) {
+      hideQuizLoading();
+      setQuizReadyUI({
+        message: `"${doc.title}" 퀴즈가 준비되었습니다!`,
+        disabled: false,
+      });
+    }
+    updateDocExtractionProgress(docId, 100);
+    if (autoOpenPanel) {
+      openQuizPanel();
+    }
+    return;
+  }
+
+  if (!silent && !cacheOnly) {
+    resetQuizProgress(`"${doc.title}" 자료를 확인하고 있어요.`);
+    setQuizReadyUI({ message: `"${doc.title}" 퀴즈를 준비 중입니다...`, disabled: true });
+    showQuizLoading(`"${doc.title}" 내용을 분석하는 중...`);
+  }
+  updateExtractionStatus(docId, "processing");
+  updateDocExtractionProgress(docId, QUIZ_STEP_PROGRESS.prepare);
 
   try {
-    const questions = await generateQuestionsForDocAI(doc);
-    runtime.currentQuiz = {
-      docId,
-      questions,
-      currentIndex: 0,
-      score: 0,
-      finished: false,
-    };
-    runtime.selectedOptionIndex = null;
-    statusEl.textContent = `"${doc.title}" 퀴즈 시작합니다!`;
-    renderQuizQuestion();
+    const { questions, notes } = await generateQuestionsForDocAI(doc, {
+      silent: silent || cacheOnly,
+    });
+    if (notes) {
+      doc.notes = notes;
+    }
+    if (cacheOnly) {
+      doc.preloadedQuiz = questions;
+      saveState();
+      updateExtractionStatus(docId, "ready");
+      updateDocExtractionProgress(docId, 100);
+      return;
+    }
+
+    if (!silent) {
+      setQuizProgressStep("finalize", "생성된 문제를 정리하는 중입니다.");
+    }
+    updateDocExtractionProgress(docId, QUIZ_STEP_PROGRESS.finalize);
+    doc.preloadedQuiz = questions;
+    if (notes) {
+      doc.notes = notes;
+    }
+    saveState();
+    prepareQuizSession({ docId, questions, title: doc.title });
+    completeQuizProgress(`"${doc.title}" 퀴즈가 준비되었습니다!`);
+    hideQuizLoading();
+    setQuizReadyUI({
+      message: `"${doc.title}" 퀴즈가 준비되었습니다!`,
+      disabled: false,
+    });
+    updateExtractionStatus(docId, "ready");
+    updateDocExtractionProgress(docId, 100);
+    if (autoOpenPanel) {
+      openQuizPanel();
+    }
   } catch (err) {
-    alert("AI 퀴즈 생성 실패: " + err.message);
-    statusEl.textContent = "퀴즈 생성 실패.";
+    if (!silent) {
+      setQuizProgressError("퀴즈 생성에 실패했습니다.");
+      alert("AI 퀴즈 생성 실패: " + err.message);
+      hideQuizLoading();
+      setQuizReadyUI({
+        message: "퀴즈 생성에 실패했습니다. 다시 시도해 주세요.",
+        disabled: true,
+      });
+    }
+    doc.preloadedQuiz = [];
+    saveState();
+    updateExtractionStatus(docId, "failed");
+    updateDocExtractionProgress(docId, 0);
   }
 }
 
@@ -55,19 +158,12 @@ export function startQuickRandomQuiz() {
 
   const doc = state.docs[Math.floor(Math.random() * state.docs.length)];
   const questions = generateLocalQuestions(doc).slice(0, 5);
-
-  runtime.currentQuiz = {
-    docId: doc.id,
-    questions,
-    currentIndex: 0,
-    score: 0,
-    finished: false,
-  };
-  runtime.selectedOptionIndex = null;
-  document.getElementById(
-    "quiz-status"
-  ).textContent = `"${doc.title}" 기반 랜덤 5문제 퀴즈입니다.`;
-  renderQuizQuestion();
+  prepareQuizSession({ docId: doc.id, questions, title: doc.title });
+  setQuizReadyUI({
+    message: `"${doc.title}" 랜덤 퀴즈가 준비되었습니다!`,
+    disabled: false,
+  });
+  openQuizPanel();
 }
 
 export function renderQuizQuestion() {
@@ -79,17 +175,20 @@ export function renderQuizQuestion() {
   const feedbackEl = document.getElementById("quiz-feedback");
   const submitBtn = document.getElementById("btn-submit-answer");
 
-  if (!runtime.currentQuiz || runtime.currentQuiz.finished) {
+  if (!runtime.currentQuiz || runtime.currentQuiz.finished || !runtime.currentQuiz.started) {
     runtime.selectedOptionIndex = null;
     body.classList.add("hidden");
     feedbackEl.textContent = "";
-    submitBtn.disabled = true;
+    if (submitBtn) submitBtn.disabled = true;
     return;
   }
 
   const { questions, currentIndex, score } = runtime.currentQuiz;
   const question = questions[currentIndex];
   body.classList.remove("hidden");
+  document.getElementById("quiz-result")?.classList.add("hidden");
+  document.getElementById("quiz-panel-title").textContent =
+    runtime.currentQuiz.sourceTitle || "AI 퀴즈";
   counter.textContent = `문제 ${currentIndex + 1}/${questions.length}`;
   scoreEl.textContent = `점수 ${score}`;
   qEl.textContent = question.q;
@@ -126,6 +225,7 @@ export function handleSubmitAnswer() {
   const isCorrect = runtime.selectedOptionIndex === question.correct;
   if (isCorrect) {
     runtime.currentQuiz.score += 10;
+    runtime.currentQuiz.correctCount = (runtime.currentQuiz.correctCount || 0) + 1;
     feedbackEl.textContent = "정답입니다! +10점";
     feedbackEl.style.color = "#16a34a";
   } else {
@@ -174,9 +274,7 @@ function finishQuiz() {
   if (!runtime.currentQuiz) return;
   runtime.currentQuiz.finished = true;
   const state = getState();
-  document.getElementById(
-    "quiz-status"
-  ).textContent = `퀴즈 완료! 총 점수: ${runtime.currentQuiz.score}점`;
+  document.getElementById("quiz-status").textContent = `퀴즈 완료! 총 점수: ${runtime.currentQuiz.score}점`;
 
   state.user.totalMinutes += 3;
   state.user.streak = Math.min(state.user.streak + 1, 365);
@@ -193,7 +291,7 @@ function finishQuiz() {
 
   saveState();
   quizCallbacks.onStateChange();
-  renderQuizQuestion();
+  showQuizResult();
 }
 
 function scheduleReviewsForDoc(docId, wrongRate) {
@@ -216,28 +314,272 @@ function scheduleReviewsForDoc(docId, wrongRate) {
   });
 }
 
-async function generateQuestionsForDocAI(doc) {
+async function generateQuestionsForDocAI(doc, { silent = false } = {}) {
   if (!doc.fileId) {
     throw new Error("fileId가 없어 서버에서 문서 내용을 읽을 수 없습니다.");
   }
 
-  const res = await fetch(`${API_BASE}/api/generate-quiz-from-file`, {
+  if (!silent) {
+    setQuizProgressStep("extract", `"${doc.title}" 문서를 분석하는 중입니다.`);
+  }
+  updateDocExtractionProgress(doc.id, QUIZ_STEP_PROGRESS.extract);
+  const requestPromise = fetch(`${API_BASE}/api/generate-quiz-from-file`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fileId: doc.fileId, numQuestions: 5 }),
   });
+
+  if (!silent) {
+    setQuizProgressStep("ai", "Gemini가 퀴즈를 생성하는 중입니다.");
+  }
+  updateDocExtractionProgress(doc.id, QUIZ_STEP_PROGRESS.ai);
+  const res = await requestPromise;
 
   const data = await res.json();
   if (!res.ok) {
     throw new Error("퀴즈 생성 실패: " + (data.error || "unknown"));
   }
 
-  return data.questions.map((q) => ({
-    q: q.question,
-    opts: q.options,
-    correct: q.correctIndex,
-    explanation: q.explanation,
+  const rawQuestions = Array.isArray(data.questions)
+    ? data.questions
+    : Array.isArray(data)
+    ? data
+    : [];
+
+  if (!rawQuestions.length) {
+    throw new Error("생성된 퀴즈가 없습니다.");
+  }
+
+  const mappedQuestions = rawQuestions.map((q, idx) => ({
+    q: q.question || q.q || `문제 ${idx + 1}`,
+    opts: Array.isArray(q.options) ? q.options : q.opts || [],
+    correct:
+      typeof q.correctIndex === "number"
+        ? q.correctIndex
+        : typeof q.correct === "number"
+        ? q.correct
+        : 0,
+    explanation: q.explanation || "",
   }));
+
+  const notesText = normalizeNotes(data.notes);
+
+  return { questions: mappedQuestions, notes: notesText };
+}
+
+function prepareQuizSession({ docId, questions, title }) {
+  runtime.currentQuiz = {
+    docId,
+    questions,
+    currentIndex: 0,
+    score: 0,
+    finished: false,
+    started: false,
+    correctCount: 0,
+    sourceTitle: title,
+  };
+  runtime.selectedOptionIndex = null;
+  runtime.lastQuizDocId = docId;
+  runtime.lastQuizSourceTitle = title;
+}
+
+export function openQuizPanel() {
+  if (!runtime.currentQuiz || !runtime.currentQuiz.questions?.length) {
+    alert("먼저 퀴즈를 생성해 주세요.");
+    return;
+  }
+  const panel = document.getElementById("quiz-play-panel");
+  if (!panel) return;
+  runtime.currentQuiz.started = true;
+  runtime.currentQuiz.finished = false;
+  runtime.currentQuiz.currentIndex = 0;
+  runtime.currentQuiz.score = 0;
+  runtime.currentQuiz.correctCount = 0;
+  runtime.selectedOptionIndex = null;
+  document.getElementById("quiz-result")?.classList.add("hidden");
+  document.getElementById("quiz-body")?.classList.remove("hidden");
+  panel.classList.remove("hidden");
+  document.getElementById("quiz-status").textContent =
+    runtime.currentQuiz.sourceTitle
+      ? `"${runtime.currentQuiz.sourceTitle}" 기반 퀴즈입니다.`
+      : "AI 퀴즈가 준비되었습니다.";
+  const submitBtn = document.getElementById("btn-submit-answer");
+  if (submitBtn) submitBtn.disabled = true;
+  renderQuizQuestion();
+}
+
+export function closeQuizPanel() {
+  document.getElementById("quiz-play-panel")?.classList.add("hidden");
+  document.getElementById("quiz-result")?.classList.add("hidden");
+  document.getElementById("quiz-body")?.classList.remove("hidden");
+  if (runtime.currentQuiz) runtime.currentQuiz.started = false;
+}
+
+export function regenerateQuiz() {
+  closeQuizPanel();
+  if (runtime.lastQuizDocId) {
+    startQuizForDoc(runtime.lastQuizDocId, { forceRegenerate: true, autoOpenPanel: true });
+  } else {
+    startQuickRandomQuiz();
+  }
+}
+
+function showQuizResult() {
+  const result = document.getElementById("quiz-result");
+  const body = document.getElementById("quiz-body");
+  if (!runtime.currentQuiz || !result || !body) return;
+  body.classList.add("hidden");
+  const total = runtime.currentQuiz.questions.length;
+  const correct = runtime.currentQuiz.correctCount || 0;
+  document.getElementById("quiz-result-summary").textContent =
+    `${total}문제 중 ${correct}개 정답`; 
+  result.classList.remove("hidden");
+}
+
+function showQuizLoading(message) {
+  const loader = document.getElementById("quiz-loading");
+  const text = document.getElementById("quiz-loading-text");
+  if (!loader || !text) return;
+  text.textContent = message;
+  loader.classList.remove("hidden");
+}
+
+function hideQuizLoading() {
+  document.getElementById("quiz-loading")?.classList.add("hidden");
+}
+
+function setQuizReadyUI({ message = QUIZ_READY_DEFAULT, disabled }) {
+  const status = document.getElementById("quiz-ready-status");
+  const btn = document.getElementById("btn-open-quiz-play");
+  if (status) status.textContent = message;
+  if (btn && typeof disabled === "boolean") {
+    btn.disabled = disabled;
+  }
+}
+
+export function syncQuizReadyUI() {
+  if (runtime.currentQuiz && runtime.currentQuiz.questions?.length) {
+    setQuizReadyUI({
+      message:
+        runtime.currentQuiz.sourceTitle
+          ? `"${runtime.currentQuiz.sourceTitle}" 퀴즈가 준비되었습니다!`
+          : "퀴즈가 준비되었습니다!",
+      disabled: false,
+    });
+  } else {
+    setQuizReadyUI({ message: QUIZ_READY_DEFAULT, disabled: true });
+  }
+}
+
+function resetQuizProgress(initialMessage) {
+  renderQuizProgressList();
+  const textEl = document.getElementById("quiz-loading-text");
+  if (textEl) {
+    textEl.style.color = "#1f2937";
+  }
+  const firstStep = QUIZ_PROGRESS_STEPS[0];
+  if (firstStep) {
+    setQuizProgressStep(firstStep.id, initialMessage);
+  }
+}
+
+function renderQuizProgressList() {
+  const listEl = document.getElementById("quiz-progress-list");
+  if (!listEl) return;
+  listEl.innerHTML = "";
+  QUIZ_PROGRESS_STEPS.forEach((step) => {
+    const li = document.createElement("li");
+    li.className = "quiz-progress-item";
+    li.dataset.step = step.id;
+
+    const indicator = document.createElement("div");
+    indicator.className = "quiz-progress-indicator";
+
+    const textWrap = document.createElement("div");
+    textWrap.className = "quiz-progress-text";
+    const title = document.createElement("strong");
+    title.textContent = step.label;
+    const desc = document.createElement("span");
+    desc.textContent = step.description;
+
+    textWrap.appendChild(title);
+    textWrap.appendChild(desc);
+    li.appendChild(indicator);
+    li.appendChild(textWrap);
+    listEl.appendChild(li);
+  });
+  quizProgressState.currentStep = QUIZ_PROGRESS_STEPS[0]?.id ?? null;
+  updateQuizProgressUI();
+}
+
+function setQuizProgressStep(stepId, customMessage) {
+  quizProgressState.currentStep = stepId;
+  updateQuizProgressUI();
+  const targetStep = QUIZ_PROGRESS_STEPS.find((step) => step.id === stepId);
+  const text = customMessage || targetStep?.label;
+  if (text) {
+    const textEl = document.getElementById("quiz-loading-text");
+    if (textEl) {
+      textEl.textContent = text;
+      textEl.style.color = "#1f2937";
+    }
+  }
+}
+
+function updateQuizProgressUI() {
+  const listEl = document.getElementById("quiz-progress-list");
+  if (!listEl || !quizProgressState.currentStep) return;
+  const index = QUIZ_PROGRESS_STEPS.findIndex((step) => step.id === quizProgressState.currentStep);
+  Array.from(listEl.children).forEach((item, idx) => {
+    item.classList.toggle("completed", idx < index);
+    item.classList.toggle("active", idx === index);
+  });
+}
+
+function completeQuizProgress(message) {
+  const lastStep = QUIZ_PROGRESS_STEPS[QUIZ_PROGRESS_STEPS.length - 1];
+  if (lastStep) {
+    setQuizProgressStep(lastStep.id, message);
+  }
+  const listEl = document.getElementById("quiz-progress-list");
+  if (!listEl) return;
+  Array.from(listEl.children).forEach((item) => {
+    item.classList.add("completed");
+    item.classList.remove("active");
+  });
+}
+
+function setQuizProgressError(message) {
+  const listEl = document.getElementById("quiz-progress-list");
+  if (listEl) {
+    Array.from(listEl.children).forEach((item) => {
+      item.classList.remove("active");
+    });
+  }
+  const textEl = document.getElementById("quiz-loading-text");
+  if (textEl) {
+    textEl.textContent = message;
+    textEl.style.color = "#dc2626";
+  }
+}
+
+function updateExtractionStatus(docId, status) {
+  const state = getState();
+  const doc = state.docs.find((d) => d.id === docId);
+  if (!doc) return;
+  doc.extractionStatus = status;
+  saveState();
+  quizCallbacks.onStateChange();
+}
+
+function updateDocExtractionProgress(docId, percent) {
+  const state = getState();
+  const doc = state.docs.find((d) => d.id === docId);
+  if (!doc) return;
+  const value = Math.max(0, Math.min(100, Math.round(Number(percent ?? 0))));
+  doc.extractionProgress = value;
+  saveState();
+  quizCallbacks.onStateChange();
 }
 
 function generateLocalQuestions(doc) {
@@ -249,6 +591,21 @@ function generateLocalQuestions(doc) {
   const pool = topics.length ? topics : [doc.title.replace(/\.[^.]+$/, "")];
 
   return pool.map((topic, idx) => buildQuestionFromTopic(topic, doc.title, idx));
+}
+
+function normalizeNotes(raw) {
+  if (Array.isArray(raw)) {
+    const cleaned = raw.map((item) => String(item || "").trim()).filter(Boolean);
+    return cleaned.join("\n\n");
+  }
+  if (typeof raw === "string") {
+    const cleaned = raw
+      .split(/\n{2,}/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    return cleaned.join("\n\n");
+  }
+  return "";
 }
 
 function buildQuestionFromTopic(topic, docTitle, idx) {

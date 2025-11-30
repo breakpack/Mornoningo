@@ -115,8 +115,12 @@
             실제 파일 내용은 분석하지 않고 이름만 사용합니다.
           </p>
           <div class="upload-row">
-            <label class="btn-primary">
-              PPT/PDF 선택
+            <label class="upload-button">
+              <span class="upload-icon">📁</span>
+              <div class="upload-text">
+                <strong>학습 자료 선택</strong>
+                <small>PDF, PPTX 파일 업로드</small>
+              </div>
               <input type="file" id="file-input" multiple accept=".ppt,.pptx,.pdf" hidden />
             </label>
           </div>
@@ -133,10 +137,13 @@
         <div class="card" id="doc-detail-card" style="display: none">
           <h2 id="doc-detail-title">자료 상세</h2>
           <p id="doc-detail-progress">0% 완료</p>
+          <div class="doc-extraction-row">
+            <span>텍스트 추출 상태</span>
+            <span id="doc-detail-extraction" class="doc-extraction-chip">대기중</span>
+          </div>
           <p>
             핵심 개념
             <strong><span id="doc-detail-concepts">0</span>개</strong>
-            추출 완료
           </p>
           <div class="button-row">
             <button id="btn-start-doc-quiz" class="btn-primary">
@@ -152,21 +159,11 @@
             <p id="doc-quiz-stats">아직 퀴즈 기록이 없습니다.</p>
           </div>
         </div>
-        <div class="card quiz-play-card">
-          <h2>퀴즈 플레이</h2>
-          <p id="quiz-status">퀴즈 유형을 선택하거나 콘텐츠에서 시작해 주세요.</p>
-
-          <div id="quiz-body" class="quiz-body hidden">
-            <div class="quiz-meta">
-              <span id="quiz-counter">문제 0/0</span>
-              <span id="quiz-score">점수 0</span>
-            </div>
-            <div id="quiz-question" class="quiz-question"></div>
-            <div id="quiz-options" class="quiz-options"></div>
-            <button id="btn-submit-answer" class="btn-primary" disabled>
-              정답 제출
-            </button>
-            <div id="quiz-feedback" class="quiz-feedback"></div>
+        <div id="quiz-loading" class="quiz-loading hidden">
+          <div class="quiz-loading-spinner"></div>
+          <div class="quiz-loading-content">
+            <p id="quiz-loading-text">퀴즈를 만드는 중...</p>
+            <ul id="quiz-progress-list" class="quiz-progress-list"></ul>
           </div>
         </div>
       </section>
@@ -243,6 +240,47 @@
         <p class="modal-score" id="modal-score"></p>
         <p class="modal-streak" id="modal-streak"></p>
         <button id="modal-challenge" class="btn-primary modal-challenge"></button>
+      </div>
+    </div>
+    <div id="quiz-play-panel" class="quiz-panel hidden" aria-hidden="true">
+      <div class="quiz-panel-inner">
+        <div class="quiz-panel-header">
+          <div>
+            <p class="quiz-panel-label">AI QUIZ</p>
+            <h3 id="quiz-panel-title">퀴즈</h3>
+          </div>
+          <button id="btn-close-quiz" class="quiz-panel-close" aria-label="닫기">×</button>
+        </div>
+        <p id="quiz-status" class="quiz-panel-status">퀴즈를 불러오는 중입니다.</p>
+        <div id="quiz-body" class="quiz-body hidden">
+          <div class="quiz-meta">
+            <span id="quiz-counter">문제 0/0</span>
+            <span id="quiz-score">점수 0</span>
+          </div>
+          <div id="quiz-question" class="quiz-question"></div>
+          <div id="quiz-options" class="quiz-options"></div>
+          <button id="btn-submit-answer" class="btn-primary" disabled>
+            정답 제출
+          </button>
+          <div id="quiz-feedback" class="quiz-feedback"></div>
+        </div>
+        <div id="quiz-result" class="quiz-result hidden">
+          <h3>수고했어요!</h3>
+          <p id="quiz-result-summary">0/0 정답</p>
+          <div class="quiz-result-actions">
+            <button id="btn-quiz-regenerate" class="btn-secondary">퀴즈 추가 생성</button>
+            <button id="btn-quiz-exit" class="btn-primary">나가기</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="notes-panel" class="notes-panel hidden" aria-hidden="true">
+      <div class="notes-panel-inner">
+        <div class="notes-panel-header">
+          <h3 id="notes-panel-title">개념노트</h3>
+          <button id="btn-close-notes" class="notes-panel-close" aria-label="닫기">×</button>
+        </div>
+        <div id="notes-panel-content" class="notes-panel-content"></div>
       </div>
     </div>
   </div>
