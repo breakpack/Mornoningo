@@ -3,21 +3,25 @@ import { getState } from "../state.js";
 export function renderProfile() {
   const state = getState();
   const user = state.user;
-  document.getElementById("profile-name").textContent = `Lv.${user.level} Data Rookie 🔥`;
+  const nameEl = document.getElementById("profile-name");
+  if (nameEl) nameEl.textContent = `Lv.${user.level} Data Rookie 🔥`;
 
   const hours = Math.floor(user.totalMinutes / 60);
   const minutes = user.totalMinutes % 60;
-  document.getElementById("profile-time").textContent = `${hours}h ${minutes}m`;
+  const timeEl = document.getElementById("profile-time");
+  if (timeEl) timeEl.textContent = `${hours}h ${minutes}m`;
 
   const accuracy =
     user.totalAnswers === 0
       ? 0
       : Math.round((user.correctAnswers / user.totalAnswers) * 100);
-  document.getElementById("profile-accuracy").textContent = `${accuracy}%`;
+  const accuracyEl = document.getElementById("profile-accuracy");
+  if (accuracyEl) accuracyEl.textContent = `${accuracy}%`;
 
-  document.getElementById("profile-ranking").textContent = `친구 평균보다 +${
-    user.bestRankDiff || 0
-  }점`;
+  const rankingEl = document.getElementById("profile-ranking");
+  if (rankingEl) {
+    rankingEl.textContent = `친구 평균보다 +${user.bestRankDiff || 0}점`;
+  }
 
   renderBadges(user);
 }

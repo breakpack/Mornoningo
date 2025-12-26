@@ -493,6 +493,117 @@
   color: #6b7280;
 }
 
+.note-loading {
+  font-size: 14px;
+  color: #4b5563;
+}
+
+.note-view-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.note-view-button {
+  flex: 1;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  padding: 8px 10px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 13px;
+  color: #4338ca;
+  cursor: pointer;
+}
+
+.note-view-button.active {
+  background: #4338ca;
+  color: #ffffff;
+  border-color: #4338ca;
+}
+
+.note-view-section.hidden-view {
+  display: none;
+}
+
+.note-page {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: #f8fafc;
+}
+
+.note-page-header {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 6px;
+}
+
+.note-page-index {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.note-page-outline {
+  font-size: 14px;
+  margin-bottom: 6px;
+  color: #1f2937;
+}
+
+.note-page-points {
+  margin: 0 0 6px 16px;
+  padding: 0;
+  font-size: 13px;
+  color: #1f2937;
+}
+
+.note-page-points li {
+  margin-bottom: 4px;
+}
+
+.note-page-question {
+  font-size: 13px;
+  color: #4338ca;
+  margin-bottom: 6px;
+}
+
+.note-page-raw {
+  font-size: 12px;
+  color: #475569;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.note-page-raw summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.note-md-section {
+  border: 1px dashed #c7d2fe;
+  border-radius: 12px;
+  padding: 12px;
+  background: #ffffff;
+  margin-bottom: 12px;
+}
+
+.note-md-label {
+  font-weight: 600;
+  color: #312e81;
+  margin-bottom: 6px;
+}
+
+.note-md-block {
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #111827;
+}
+
 .review-item-header {
   display: flex;
   justify-content: space-between;

@@ -45,6 +45,7 @@ function ensureStateShape() {
     appState.leaderboard = buildFallbackLeaderboard(appState);
   }
   ensureLeaderboardSeed();
+  ensureDocsDefaults();
 }
 
 function createSampleState() {
@@ -59,6 +60,7 @@ function createSampleState() {
       createdAt: today,
       notes:
         "- 프로세스/스레드 개념 정리\n- 프로세스 상태 전이\n- 스케줄링 알고리즘(FCFS, SJF, RR)\n- 동기화와 세마포어\n- 교착상태 조건",
+      learningNoteStatus: "ready",
       quizStats: { attempts: 2, correct: 15, total: 20 },
     },
     {
@@ -70,6 +72,7 @@ function createSampleState() {
       createdAt: today,
       notes:
         "- 배열, 연결리스트 비교\n- 스택/큐, 덱\n- 트리/그래프 기본 용어\n- 시간 복잡도 개념(O, Ω, Θ)",
+      learningNoteStatus: "ready",
       quizStats: { attempts: 1, correct: 6, total: 10 },
     },
   ];
@@ -153,4 +156,16 @@ function ensureLeaderboardSeed() {
         : entry
     )
     .sort((a, b) => b.score - a.score);
+}
+
+function ensureDocsDefaults() {
+  if (!Array.isArray(appState.docs)) {
+    appState.docs = [];
+    return;
+  }
+  appState.docs = appState.docs.map((doc) => {
+    if (!doc) return doc;
+    const status = doc.learningNoteStatus || (doc.notes ? "ready" : "pending");
+    return { ...doc, learningNoteStatus: status };
+  });
 }

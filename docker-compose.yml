@@ -1,0 +1,14 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mornoningo-app:latest
+    ports:
+      - "${APP_PORT:-4000}:4000"
+    env_file:
+      - server/.env
+    volumes:
+      - ./server/upload:/app/server/upload
+      - ./server/data:/app/server/data
+    restart: unless-stopped

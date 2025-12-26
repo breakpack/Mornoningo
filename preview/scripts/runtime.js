@@ -5,4 +5,5 @@ export const runtime = {
   selectedOptionIndex: null,
   lastQuizDocId: null,
   lastQuizSourceTitle: null,
+  learningNotesCache: {},
 };

@@ -20,8 +20,9 @@
 ## 백엔드 (server/)
 - FastAPI (`main.py`)가 프론트 정적 자산을 함께 서빙하며 `/api/*` 엔드포인트를 제공
 - 업로드 파일은 `server/upload`, 생성된 퀴즈 기록은 JSON 스토리지(`server/data/quizzes.json`)에 저장
+- 학습노트는 `server/data/notes/{fileId}.json`에 페이지별 요약·윈도우별 Markdown을 보존
 - PDF는 `pypdf`, PPTX는 단순 XML 파싱으로 텍스트를 추출하고 `normalize_text`로 정리 후 Gemini 2.0 Flash 호출
-- 주요 API: `/api/upload`, `/api/generate-quiz`, `/api/generate-quiz-from-file`, `/health`
+- 주요 API: `/api/upload`, `/api/generate-quiz`, `/api/generate-quiz-from-file`, `/api/generate-learning-note`, `/api/learning-note/{fileId}`, `/health`
 
 ## UX 흐름
 1. 자료 업로드 → 상태 `pending`

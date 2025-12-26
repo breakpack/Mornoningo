@@ -1,0 +1,13 @@
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+*.swp
+*.log
+server/.venv
+server/node_modules
+server/upload
+server/data
+preview/node_modules
+preview/dist
+*.hwp
