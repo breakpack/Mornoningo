@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Iterable
+from typing import Dict, Iterable, List
 from zipfile import ZipFile
 
 from pypdf import PdfReader
@@ -16,29 +16,42 @@ def normalize_text(text: str) -> str:
 
 
 def extract_text_from_pdf(file_path: Path) -> str:
+    pages = extract_pdf_pages(file_path)
+    return normalize_text("\n".join(page["text"] for page in pages))
+
+
+def extract_text_from_pptx(file_path: Path) -> str:
+    slides = extract_pptx_slides(file_path)
+    return normalize_text("\n".join(slide["text"] for slide in slides))
+
+
+def extract_pdf_pages(file_path: Path) -> List[Dict[str, str]]:
     reader = PdfReader(str(file_path))
-    parts = []
-    for page in reader.pages:
+    pages: List[Dict[str, str]] = []
+    for idx, page in enumerate(reader.pages, start=1):
         try:
             page_text = page.extract_text() or ""
         except Exception:  # pragma: no cover - best effort extraction
             page_text = ""
-        parts.append(page_text)
-    return normalize_text("\n".join(parts))
+        normalized = normalize_text(page_text)
+        pages.append({"index": idx, "label": f"Page {idx}", "text": normalized})
+    return pages
 
 
-def extract_text_from_pptx(file_path: Path) -> str:
-    parts = []
+def extract_pptx_slides(file_path: Path) -> List[Dict[str, str]]:
+    slides: List[Dict[str, str]] = []
     with ZipFile(file_path) as archive:
         slide_files = sorted(
             name
             for name in archive.namelist()
             if name.startswith("ppt/slides/slide") and name.endswith(".xml")
         )
-        for name in slide_files:
+        for idx, name in enumerate(slide_files, start=1):
             xml_bytes = archive.read(name)
-            parts.extend(_extract_text_nodes(xml_bytes.decode("utf-8", errors="ignore")))
-    return normalize_text("\n".join(parts))
+            text_nodes = list(_extract_text_nodes(xml_bytes.decode("utf-8", errors="ignore")))
+            normalized = normalize_text("\n".join(text_nodes))
+            slides.append({"index": idx, "label": f"Slide {idx}", "text": normalized})
+    return slides
 
 
 def _extract_text_nodes(xml_text: str) -> Iterable[str]:

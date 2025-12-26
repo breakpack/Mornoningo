@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -18,7 +18,14 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from file_parsers import extract_text_from_pdf, extract_text_from_pptx, normalize_text
+from file_parsers import (
+    extract_pdf_pages,
+    extract_pptx_slides,
+    extract_text_from_pdf,
+    extract_text_from_pptx,
+    normalize_text,
+)
+from learning_note_storage import LearningNoteStorage
 from quiz_storage import QuizStorage
 
 load_dotenv()
@@ -29,15 +36,19 @@ PREVIEW_DIR = ROOT_DIR / "preview"
 UPLOAD_DIR = BASE_DIR / "upload"
 DATA_DIR = BASE_DIR / "data"
 QUIZ_STORE_PATH = DATA_DIR / "quizzes.json"
+LEARNING_NOTE_DIR = DATA_DIR / "notes"
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 quiz_storage = QuizStorage(QUIZ_STORE_PATH)
+learning_note_storage = LearningNoteStorage(LEARNING_NOTE_DIR)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 MAX_SOURCE_CHARS = 8000
+MAX_PAGE_PROMPT_CHARS = 3500
+MAX_PAGE_TEXT_CHARS = 6000
 
 
 @lru_cache(maxsize=1)
@@ -74,6 +85,12 @@ class QuizFromTextRequest(BaseModel):
 class QuizFromFileRequest(BaseModel):
     fileId: str = Field(..., min_length=8)
     numQuestions: int = Field(default=5, ge=1, le=20)
+
+
+class LearningNoteRequest(BaseModel):
+    fileId: str = Field(..., min_length=8)
+    windowSize: int = Field(default=3, ge=1, le=7)
+    force: bool = Field(default=False)
 
 
 app = FastAPI(title="Mornoningo Quiz API", version="0.2.0")
@@ -182,6 +199,64 @@ async def generate_quiz_from_file(payload: QuizFromFileRequest) -> Dict[str, Any
         }
     )
     return {"questions": questions, "notes": notes, "quizId": record["id"]}
+
+
+@app.post("/api/generate-learning-note")
+async def generate_learning_note(payload: LearningNoteRequest) -> Dict[str, Any]:
+    existing = learning_note_storage.read(payload.fileId)
+    if existing and not payload.force:
+        return existing
+
+    file_path = (UPLOAD_DIR / payload.fileId).resolve()
+    if not str(file_path).startswith(str(UPLOAD_DIR.resolve())) or not file_path.exists():
+        raise HTTPException(status_code=404, detail="업로드된 파일을 찾을 수 없습니다.")
+
+    chunks = _extract_page_chunks(file_path)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="문서에서 요약할 페이지를 찾을 수 없습니다.")
+
+    pages = []
+    for chunk in chunks:
+        text = chunk.get("text", "").strip()
+        if not text:
+            continue
+        summary = await _summarize_single_page(chunk["label"], text[:MAX_PAGE_PROMPT_CHARS])
+        pages.append(
+            {
+                "index": chunk["index"],
+                "label": chunk["label"],
+                "text": _clip_text(text, MAX_PAGE_TEXT_CHARS),
+                "summary": summary,
+            }
+        )
+
+    if not pages:
+        raise HTTPException(status_code=400, detail="요약 가능한 페이지 내용이 없습니다.")
+
+    windows = await _summarize_windows(pages, payload.windowSize)
+    merged_md = _merge_markdown(windows)
+    now = datetime.now(timezone.utc).isoformat()
+    created_at = (existing or {}).get("createdAt")
+    record = {
+        "fileId": payload.fileId,
+        "createdAt": created_at or now,
+        "updatedAt": now,
+        "pageCount": len(pages),
+        "windowSize": payload.windowSize,
+        "pages": pages,
+        "windows": windows,
+        "markdown": merged_md,
+    }
+    learning_note_storage.save(payload.fileId, record)
+    return record
+
+
+@app.get("/api/learning-note/{file_id}")
+async def get_learning_note(file_id: str) -> Dict[str, Any]:
+    record = learning_note_storage.read(file_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="학습노트를 찾을 수 없습니다.")
+    return record
 
 
 def _build_text_prompt(source: str, num_questions: int, difficulty: str) -> str:
@@ -304,3 +379,144 @@ def _parse_quiz_payload(raw: str) -> Dict[str, Any]:
             notes_raw = [str(item).strip() for item in candidate if str(item).strip()]
 
     return {"questions": questions, "notes": notes_raw}
+
+
+async def _summarize_single_page(label: str, text: str) -> Dict[str, Any]:
+    prompt = _build_page_summary_prompt(label, text)
+    raw = await generate_with_gemini(prompt)
+    return _parse_page_summary(raw)
+
+
+def _build_page_summary_prompt(label: str, text: str) -> str:
+    return f"""
+당신은 대학 강의 슬라이드를 요약하는 조교입니다. 주어진 페이지 내용을 바탕으로 구체적 개요를 출력하세요.
+
+출력 형식(JSON만 허용):
+{{
+  "outline": "두세 문장으로 페이지 전체 요약",
+  "keyPoints": ["핵심 포인트1", "핵심 포인트2", "핵심 포인트3"],
+  "studyQuestion": "복습할 때 스스로에게 던질 질문"
+}}
+
+지침:
+- 한국어 사용
+- 실제 페이지에서 확인할 수 있는 사실, 개념, 숫자를 포함
+- keyPoints는 3~5개 bullet, 각 항목은 1문장
+- studyQuestion은 한 문장으로 마무리
+
+페이지: {label}
+본문:
+{text}
+""".strip()
+
+
+def _parse_page_summary(raw: str) -> Dict[str, Any]:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail={"error": "페이지 요약 JSON 파싱 실패", "raw": raw}) from exc
+
+    outline = str(data.get("outline") or data.get("summary") or "").strip()
+    key_points_raw = data.get("keyPoints") or data.get("bullets") or data.get("details") or []
+    if isinstance(key_points_raw, str):
+        key_points = [item.strip() for item in key_points_raw.splitlines() if item.strip()]
+    elif isinstance(key_points_raw, list):
+        key_points = [str(item).strip() for item in key_points_raw if str(item).strip()]
+    else:
+        key_points = []
+    key_points = key_points[:5]
+    study_question = str(data.get("studyQuestion") or data.get("quiz") or "").strip()
+
+    return {
+        "outline": outline,
+        "keyPoints": key_points,
+        "studyQuestion": study_question,
+    }
+
+
+async def _summarize_windows(pages: Sequence[Dict[str, Any]], window_size: int) -> List[Dict[str, Any]]:
+    if not pages:
+        return []
+
+    clamped_size = max(1, min(window_size, len(pages)))
+    left = clamped_size // 2
+    right = clamped_size - left - 1
+
+    windows: List[Dict[str, Any]] = []
+    seen: set[Tuple[int, int]] = set()
+    for idx in range(len(pages)):
+        start = max(0, idx - left)
+        end = min(len(pages), idx + right + 1)
+        if end - start <= 0:
+            continue
+        key = (start, end)
+        if key in seen:
+            continue
+        seen.add(key)
+        window_pages = list(pages[start:end])
+        markdown = await _summarize_window_block(window_pages)
+        windows.append(
+            {
+                "startPage": window_pages[0]["index"],
+                "endPage": window_pages[-1]["index"],
+                "pageIndexes": [page["index"] for page in window_pages],
+                "markdown": markdown,
+            }
+        )
+
+    windows.sort(key=lambda item: item["startPage"])
+    return windows
+
+
+async def _summarize_window_block(window_pages: Sequence[Dict[str, Any]]) -> str:
+    prompt = _build_window_prompt(window_pages)
+    raw = await generate_with_gemini(prompt)
+    return raw.strip()
+
+
+def _build_window_prompt(window_pages: Sequence[Dict[str, Any]]) -> str:
+    parts = []
+    for page in window_pages:
+        summary = page.get("summary") or {}
+        points = summary.get("keyPoints") or []
+        bullet_text = "\n".join(f"- {item}" for item in points if item)
+        parts.append(
+            f"페이지 p{page['index']} ({page['label']}):\n"
+            f"개요: {summary.get('outline', '')}\n"
+            f"핵심:\n{bullet_text}\n"
+            f"질문: {summary.get('studyQuestion', '')}"
+        )
+    joined = "\n\n".join(parts)
+    return f"""
+연속된 학습 자료 페이지 요약을 입력으로 받습니다. 중복되는 설명을 통합하고 Markdown으로 정리하세요.
+
+규칙:
+- 각 섹션 제목은 `### Pages 시작-끝` 형식
+- 불릿마다 기여한 페이지를 괄호로 표기 (예: (p2,p3))
+- 앞뒤 페이지에서 이미 다룬 내용은 제거하거나 묶어서 하나의 bullet로
+- Markdown 이외 텍스트를 추가하지 마세요
+
+페이지 요약:
+{joined}
+""".strip()
+
+
+def _merge_markdown(windows: Sequence[Dict[str, Any]]) -> str:
+    parts = [item.get("markdown", "").strip() for item in windows if item.get("markdown")]
+    return "\n\n".join(part for part in parts if part)
+
+
+def _clip_text(value: str, limit: int) -> str:
+    text = (value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + " …"
+
+
+def _extract_page_chunks(file_path: Path) -> List[Dict[str, Any]]:
+    ext = file_path.suffix.lower()
+    if ext == ".pdf":
+        return extract_pdf_pages(file_path)
+    if ext == ".pptx":
+        return extract_pptx_slides(file_path)
+    raise HTTPException(status_code=400, detail=f"지원하지 않는 파일 확장자: {ext}")
